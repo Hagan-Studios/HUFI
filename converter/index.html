@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="../icon.ico">
+    <title>HUFI Image Converter</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Pako CDN for zlib/deflate compression -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+        /* Grid pattern for image background */
+        .canvas-grid-bg {
+            background-color: #f8fafc;
+            background-image: linear-gradient(45deg, #e2e8f0 25%, transparent 25%), 
+                              linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), 
+                              linear-gradient(45deg, transparent 75%, #e2e8f0 75%), 
+                              linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4">
+        <div class="max-w-4xl mx-auto flex items-center justify-between">
+            <div>
+                <h1 class="text-xl font-bold text-gray-900 tracking-tight">HUFI Image Converter</h1>
+                <p class="text-xs text-gray-500 mt-0.5">Convert standard images into custom compressed .hufi binary files</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-4xl w-full mx-auto p-4 md:p-6 space-y-6">
+
+        <!-- Upload & Convert Card -->
+        <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <h2 class="text-base font-semibold text-gray-900 mb-1">Upload Source Image</h2>
+            <p class="text-xs text-gray-500 mb-4">Select an image to process with horizontal sub-filtering and zlib Deflate compression.</p>
+
+            <!-- Dropzone -->
+            <div id="dropzone" 
+                 class="border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-lg p-8 text-center bg-gray-50 hover:bg-blue-50/30 cursor-pointer transition-colors"
+                 onclick="document.getElementById('file-input').click()">
+                <input type="file" id="file-input" class="hidden" accept="image/png, image/jpeg, image/webp, image/bmp, image/gif" onchange="handleFileSelect(event)">
+                <svg class="mx-auto h-10 w-10 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+                <p class="text-sm font-medium text-gray-700">Click to upload or drag & drop an image</p>
+                <p class="text-xs text-gray-400 mt-1">PNG, JPG, WEBP, BMP, or GIF</p>
+            </div>
+
+            <!-- Error message container -->
+            <div id="encoder-error" class="hidden mt-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded"></div>
+        </div>
+
+        <!-- Encoding Results & Statistics Card -->
+        <div id="encoder-results" class="hidden bg-white p-6 rounded-lg border border-gray-200 shadow-sm space-y-6">
+            <div class="flex items-center justify-between pb-3 border-b border-gray-100">
+                <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider">Conversion Results</h3>
+                <span class="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                    </svg>
+                    Encoding Complete
+                </span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                
+                <!-- Source Image Visual Preview -->
+                <div class="space-y-2">
+                    <span class="text-xs font-medium text-gray-500 uppercase tracking-wider block">Source Image Preview</span>
+                    <div class="canvas-grid-bg border border-gray-200 rounded p-2 flex items-center justify-center min-h-[200px] max-h-[300px] overflow-hidden">
+                        <img id="source-img-preview" class="max-w-full max-h-[280px] object-contain rounded" alt="Source image preview">
+                    </div>
+                </div>
+
+                <!-- Metrics & Details -->
+                <div class="flex flex-col justify-between h-full space-y-4">
+                    <dl class="divide-y divide-gray-100 text-sm">
+                        <div class="py-2 flex justify-between">
+                            <dt class="text-gray-500 text-xs">Image File Name:</dt>
+                            <dd id="stat-filename" class="font-medium text-gray-900 truncate max-w-[180px] text-xs">-</dd>
+                        </div>
+                        <div class="py-2 flex justify-between">
+                            <dt class="text-gray-500 text-xs">Dimensions:</dt>
+                            <dd id="stat-dimensions" class="font-medium text-gray-900 text-xs">-</dd>
+                        </div>
+                        <div class="py-2 flex justify-between">
+                            <dt class="text-gray-500 text-xs">Original File Size:</dt>
+                            <dd id="stat-orig-size" class="font-medium text-gray-900 text-xs">-</dd>
+                        </div>
+                        <div class="py-2 flex justify-between">
+                            <dt class="text-gray-500 text-xs">Uncompressed Raw RGB:</dt>
+                            <dd id="stat-raw-size" class="font-medium text-gray-900 text-xs">-</dd>
+                        </div>
+                        <div class="py-2 flex justify-between">
+                            <dt class="text-gray-500 text-xs">Encoded .HUFI Size:</dt>
+                            <dd id="stat-hufi-size" class="font-bold text-blue-700 text-xs">-</dd>
+                        </div>
+                        <div class="py-2 flex justify-between">
+                            <dt class="text-gray-500 text-xs">Compression Saved:</dt>
+                            <dd id="stat-ratio" class="font-semibold text-emerald-600 text-xs">-</dd>
+                        </div>
+                    </dl>
+
+                    <button id="download-btn" onclick="downloadHufiFile()" class="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-2.5 px-4 rounded text-sm text-center transition-colors shadow-sm flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        Download .HUFI File
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 py-4 mt-auto">
+        <div class="max-w-4xl mx-auto px-6 text-center text-xs text-gray-400">
+            Hagan's Ultimate Format for Images (HUFI) &bull; HUFI Converter Online &bull; Copyright &copy; 2026 Hagan Ernest Pereira
+        </div>
+    </footer>
+
+    <!-- Hidden Canvas for Offscreen Image Processing -->
+    <canvas id="offscreen-canvas" class="hidden"></canvas>
+
+    <!-- Application Logic -->
+    <script>
+        let encodedHufiBlob = null;
+        let encodedFilename = '';
+
+        window.onload = function() {
+            setupDropzone();
+        };
+
+        function setupDropzone() {
+            const dropzone = document.getElementById('dropzone');
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.add('border-blue-500', 'bg-blue-50/50');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.remove('border-blue-500', 'bg-blue-50/50');
+                }, false);
+            });
+
+            dropzone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                if (dt.files && dt.files.length > 0) {
+                    handleFile(dt.files[0]);
+                }
+            }, false);
+        }
+
+        function handleFileSelect(e) {
+            if (e.target.files && e.target.files[0]) {
+                handleFile(e.target.files[0]);
+            }
+        }
+
+        function handleFile(file) {
+            hideError();
+            if (!file.type.startsWith('image/')) {
+                showError('Please upload a valid image file (PNG, JPG, WEBP, BMP, GIF).');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                const img = new Image();
+                img.onload = function() {
+                    encodeImageToHufi(img, file);
+                };
+                img.onerror = function() {
+                    showError('Failed to load image data.');
+                };
+                img.src = evt.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function encodeImageToHufi(img, origFile) {
+            const width = img.width;
+            const height = img.height;
+
+            if (width === 0 || height === 0) {
+                showError('Invalid image dimensions (0x0).');
+                return;
+            }
+
+            // Render to offscreen canvas to extract RGBA pixel buffer
+            const offCanvas = document.getElementById('offscreen-canvas');
+            offCanvas.width = width;
+            offCanvas.height = height;
+            const ctx = offCanvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            const imgData = ctx.getImageData(0, 0, width, height);
+            const rgba = imgData.data;
+
+            // Pipeline Step 1: Strip Alpha & Apply Horizontal Sub-Filter on RGB
+            const numPixels = width * height;
+            const subFiltered = new Uint8Array(numPixels * 3);
+
+            for (let y = 0; y < height; y++) {
+                let prevR = 0, prevG = 0, prevB = 0;
+                for (let x = 0; x < width; x++) {
+                    const srcIdx = (y * width + x) * 4;
+                    const destIdx = (y * width + x) * 3;
+
+                    const r = rgba[srcIdx];
+                    const g = rgba[srcIdx + 1];
+                    const b = rgba[srcIdx + 2];
+
+                    if (x === 0) {
+                        subFiltered[destIdx] = r;
+                        subFiltered[destIdx + 1] = g;
+                        subFiltered[destIdx + 2] = b;
+                    } else {
+                        // Sub Filter: (val - prev_val) mod 256
+                        subFiltered[destIdx] = (r - prevR) & 0xFF;
+                        subFiltered[destIdx + 1] = (g - prevG) & 0xFF;
+                        subFiltered[destIdx + 2] = (b - prevB) & 0xFF;
+                    }
+
+                    prevR = r;
+                    prevG = g;
+                    prevB = b;
+                }
+            }
+
+            // Pipeline Step 2: Deflate compress filtered bytes using pako
+            let compressedPayload;
+            try {
+                compressedPayload = pako.deflate(subFiltered);
+            } catch (err) {
+                showError('Deflate compression failed: ' + err.message);
+                return;
+            }
+
+            // Pipeline Step 3: Construct 13-Byte Header + Payload
+            // Header spec:
+            // 0..3   : Magic ASCII "HUFI"
+            // 4..7   : Width (Uint32 LE)
+            // 8..11  : Height (Uint32 LE)
+            // 12     : Channels (Uint8 = 3)
+            const headerSize = 13;
+            const hufiBuffer = new Uint8Array(headerSize + compressedPayload.length);
+
+            // Magic 'HUFI'
+            hufiBuffer[0] = 0x48; // 'H'
+            hufiBuffer[1] = 0x55; // 'U'
+            hufiBuffer[2] = 0x46; // 'F'
+            hufiBuffer[3] = 0x49; // 'I'
+
+            // Width and Height in Little Endian
+            const view = new DataView(hufiBuffer.buffer);
+            view.setUint32(4, width, true);
+            view.setUint32(8, height, true);
+
+            // 3 Channels (RGB)
+            hufiBuffer[12] = 3;
+
+            // Copy payload
+            hufiBuffer.set(compressedPayload, headerSize);
+
+            // Prepare download Blob
+            encodedHufiBlob = new Blob([hufiBuffer], { type: 'application/octet-stream' });
+            const baseName = origFile.name.substring(0, origFile.name.lastIndexOf('.')) || origFile.name;
+            encodedFilename = `${baseName}.hufi`;
+
+            // Display Results
+            document.getElementById('source-img-preview').src = img.src;
+            document.getElementById('stat-filename').textContent = origFile.name;
+            document.getElementById('stat-dimensions').textContent = `${width} × ${height} px`;
+
+            const rawRgbSize = numPixels * 3;
+            const hufiSize = hufiBuffer.length;
+            const savingsVsRaw = (((rawRgbSize - hufiSize) / rawRgbSize) * 100).toFixed(1);
+
+            document.getElementById('stat-orig-size').textContent = formatBytes(origFile.size);
+            document.getElementById('stat-raw-size').textContent = formatBytes(rawRgbSize);
+            document.getElementById('stat-hufi-size').textContent = formatBytes(hufiSize);
+            document.getElementById('stat-ratio').textContent = `${savingsVsRaw}% vs Raw RGB`;
+
+            document.getElementById('encoder-results').classList.remove('hidden');
+        }
+
+        function downloadHufiFile() {
+            if (!encodedHufiBlob) return;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(encodedHufiBlob);
+            a.download = encodedFilename || 'image.hufi';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function showError(text) {
+            const el = document.getElementById('encoder-error');
+            el.textContent = text;
+            el.classList.remove('hidden');
+        }
+
+        function hideError() {
+            const el = document.getElementById('encoder-error');
+            el.classList.add('hidden');
+            el.textContent = '';
+        }
+    </script>
+</body>
+</html>
